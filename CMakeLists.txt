@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.19...3.31)
 
-project(Atom3D VERSION 1.0
-               DESCRIPTION "Cross platform Vulkan Game Engine")
+project(Atom3D)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
