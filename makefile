@@ -1,4 +1,4 @@
-build:
+build: ./src/main.cpp
 	mkdir build; cd build; cmake ..; make;
 
 main:
