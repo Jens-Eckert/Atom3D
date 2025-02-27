@@ -1,0 +1,8 @@
+{
+  "files.associations": {
+    "*.rpy": "renpy",
+    "*.txt": "",
+    "*.ejs": "html",
+    "vector": "cpp"
+  }
+}

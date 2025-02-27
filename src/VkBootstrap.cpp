@@ -300,6 +300,7 @@ const char* to_string_message_severity(VkDebugUtilsMessageSeverityFlagBitsEXT s)
     }
 }
 const char* to_string_message_type(VkDebugUtilsMessageTypeFlagsEXT s) {
+    if (s == 8) return "Atom3D";
     if (s == 7) return "General | Validation | Performance";
     if (s == 6) return "Validation | Performance";
     if (s == 5) return "General | Performance";
