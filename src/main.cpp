@@ -5,17 +5,64 @@
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
-#include <fstream>
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
+
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
+
+#if defined(WIN32) 
+#include <Windows.h>
+
+const HANDLE console = GetStdHandle(STD_OUTPUT_HANDLE);
+#else if defined(__AAPL__)
+#endif
 
 #include "App.hpp"
 #include "VkBootstrap.h"
 
 constexpr int MAX_FRAMES_IN_FLIGHT = 3;
+
+// Custom Debug Callback
+VkBool32 debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+                       VkDebugUtilsMessageTypeFlagsEXT type,
+                       const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+                       void* pUserData) {
+    auto sevStr = vkb::to_string_message_severity(severity);
+    auto typeStr = vkb::to_string_message_type(type);
+
+#if defined(WIN32)
+    int color;
+
+    switch (severity) { 
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
+        color = 36;
+        break;
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
+        color = 32;
+        break;
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+        color = 36;
+        break;
+    case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+        color = 31;
+        break;
+    default:
+        color = 37;
+        break;
+    }
+
+    std::cout << "\x1b[" << color << "m[" << sevStr << ": " << typeStr << "]: ";
+
+    std::cout << "\x1b[37m" << pCallbackData->pMessage << "\n";
+#else if defined(__AAPL__)
+    printf("[%s : %s] : %s\n", sevStr, typeStr, pCallbackData->pMessage);
+#endif
+
+    return VK_FALSE;
+}
 
 class App {
 public:
@@ -26,13 +73,14 @@ public:
         }
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
         m_glfwWindow = glfwCreateWindow(800, 600, "Atom3D", nullptr, nullptr);
 
         vkb::InstanceBuilder builder;
         auto instRet = builder
                            .set_app_name("Atom3D")
                            .request_validation_layers()
-                           .use_default_debug_messenger()
+                            .set_debug_callback(debugCallback)
                            .set_debug_messenger_severity(debug_severity)
                            .set_debug_messenger_type(debug_types)
                            .build();
@@ -138,31 +186,32 @@ public:
     }
 
     bool recreateSwapchain() {
-        destroySwapchain();
+        destroySwapchainDependants();
 
         createSwapchain();
         createSwapchainImageViews();
+        createFramebuffers();
         createCommandPool();
         createCommandBuffers();
 
         return true;
     }
 
-    void destroySwapchain() {
+    void destroySwapchainDependants(const bool bingbong = false) {
         m_device.waitIdle();
 
         m_device.freeCommandBuffers(m_commandPool, m_commandBuffers);
         m_device.destroyCommandPool(m_commandPool);
 
         // Destroy Framebuffers
-        for (auto f : m_framebuffers) {
+        for (auto& f : m_framebuffers) {
             m_device.destroyFramebuffer(f);
         }
 
         // Destroy Image Views
         m_vkbSwapchain.destroy_image_views(m_swapchainImageViews);
 
-        vkb::destroy_swapchain(m_vkbSwapchain);
+        if (bingbong) vkb::destroy_swapchain(m_vkbSwapchain);
     }
 
     bool getQueues() {
@@ -410,7 +459,7 @@ public:
     }
 
     bool drawFrame() {
-        m_device.waitForFences(m_inFlightFences[m_currentFrame], true, UINT64_MAX);
+        auto fenceWait = m_device.waitForFences(m_inFlightFences[m_currentFrame], true, UINT64_MAX);
 
         auto imageIndex = m_device.acquireNextImageKHR(m_vkbSwapchain.swapchain,
                                                        UINT64_MAX,
@@ -425,7 +474,7 @@ public:
         }
 
         if (m_imageInFlightFences[imageIndex.value] != VK_NULL_HANDLE) {
-            m_device.waitForFences(m_imageInFlightFences[imageIndex.value], true, UINT64_MAX);
+            fenceWait = m_device.waitForFences(m_imageInFlightFences[imageIndex.value], true, UINT64_MAX);
         }
 
         m_imageInFlightFences[imageIndex.value] = m_inFlightFences[m_currentFrame];
@@ -451,9 +500,10 @@ public:
 
         auto r = m_presentQueue.presentKHR(presentInfo);
 
-        if (r == vk::Result::eErrorOutOfDateKHR || r == vk::Result::eSuboptimalKHR)
+        if (r == vk::Result::eErrorOutOfDateKHR ||
+            r == vk::Result::eSuboptimalKHR) {
             return recreateSwapchain();
-        else if (r != vk::Result::eSuccess) {
+        } else if (r != vk::Result::eSuccess) {
             std::cerr << "Failed to present swapchain image.\n";
             return false;
         }
@@ -477,16 +527,16 @@ public:
     void destroy() {
         m_device.waitIdle();
 
-        for (auto s : m_imageAvailableSems)
+        for (auto& s : m_imageAvailableSems)
             m_device.destroySemaphore(s);
 
-        for (auto s : m_renderFinishedSems)
+        for (auto& s : m_renderFinishedSems)
             m_device.destroySemaphore(s);
 
-        for (auto f : m_inFlightFences)
+        for (auto& f : m_inFlightFences)
             m_device.destroyFence(f);
 
-        destroySwapchain();
+        destroySwapchainDependants(true);
 
         m_device.destroyPipeline(m_graphicsPipeline);
         m_device.destroyPipelineLayout(m_pipelineLayout);
@@ -550,13 +600,17 @@ private:
 };
 
 int main() {
-    App app;
+#if defined(WIN32)
+    SetConsoleMode(console, ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+#endif
 
-    app.init();
+   App app;
 
-    app.windowLoop();
+   app.init();
 
-    app.destroy();
+   app.windowLoop();
+
+   app.destroy();
 
     return 0;
 }

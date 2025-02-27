@@ -2,7 +2,11 @@ cmake_minimum_required(VERSION 3.19...3.31)
 
 project(Atom3D)
 
-message("CMAKE_INSTALL_PREFIX: ${CMAKE_INSTALL_PREFIX}") 
+if(WIN32)
+    set(CMAKE_PREFIX_PATH "D:/dev/glfw-3.4/install/lib/cmake/glfw3")
+endif()
+
+message("CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}") 
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_BUILD_TYPE Debug)
@@ -21,6 +25,3 @@ find_package(glm REQUIRED)
 target_link_libraries(main Vulkan::Vulkan)
 target_link_libraries(main glfw)
 target_link_libraries(main glm::glm)
-
-#execute_process(COMMAND glslc ../src/shaders/shader.vert -o ../src/shaders/vert.spv)
-#execute_process(COMMAND glslc ../src/shaders/shader.frag -o ../src/shaders/frag.spv)
