@@ -7,6 +7,7 @@
 struct AllocatedBuffer {
     vk::Buffer buffer;
     vma::Allocation allocation;
+    vma::AllocationInfo info;
 };
 
 #endif

@@ -11,7 +11,12 @@ const HANDLE console = GetStdHandle(STD_OUTPUT_HANDLE);
 
 int main() {
 #if defined(WIN32) && defined(_DEBUG)
-    SetConsoleMode(console, ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    DWORD currentConfig;
+    GetConsoleMode(console, &currentConfig);
+
+    SetConsoleMode(console, ENABLE_PROCESSED_OUTPUT |
+                                ENABLE_VIRTUAL_TERMINAL_PROCESSING |
+                                currentConfig);
 #endif
 
     App app;

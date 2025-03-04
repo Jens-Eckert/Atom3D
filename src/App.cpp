@@ -31,6 +31,9 @@ static VkBool32 debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
     std::cout << "\x1b[" << color << "m[" << sevStr << ": " << typeStr << "]: ";
     std::cout << "\x1b[37m" << pCallbackData->pMessage << "\n";
 
+    //std::cout << "[" << sevStr << ": " << typeStr << "]: ";
+    //std::cout  << pCallbackData->pMessage << "\n";
+
     return VK_FALSE;
 }
 
@@ -96,9 +99,9 @@ bool App::init() {
         return false;
     }
 
-    vkb::PhysicalDevice pd = physRet.value();
+    m_vkbPD = physRet.value();
 
-    vkb::DeviceBuilder device_builder{pd};
+    vkb::DeviceBuilder device_builder{m_vkbPD};
     auto deviceRet = device_builder.build();
 
     if (!deviceRet) {
@@ -108,6 +111,14 @@ bool App::init() {
 
     m_vkbDevice = deviceRet.value();
     m_device = m_vkbDevice.device;
+
+    vma::AllocatorCreateInfo allocatorInfo;
+    allocatorInfo.setPhysicalDevice(m_vkbPD.physical_device)
+        .setDevice(m_device)
+        .setInstance(m_instance)
+        .setFlags(vma::AllocatorCreateFlagBits::eBufferDeviceAddress);
+
+    m_vmaAllocator = vma::createAllocator(allocatorInfo);
 
     if (!createSwapchain()) {
         return false;
@@ -297,8 +308,8 @@ bool App::createGraphicsPipeline() {
     auto attrDesc = Vertex::getAttrDesc();
 
     vk::PipelineVertexInputStateCreateInfo vertexInputInfo;
-    vertexInputInfo.setVertexBindingDescriptions(binding)
-        .setVertexAttributeDescriptions(attrDesc);
+    //vertexInputInfo.setVertexBindingDescriptions(binding)
+    //    .setVertexAttributeDescriptions(attrDesc);
 
     vk::PipelineInputAssemblyStateCreateInfo inputAssemblyInfo({}, vk::PrimitiveTopology::eTriangleList, false);
 
@@ -486,7 +497,7 @@ bool App::drawFrame() {
     vk::SubmitInfo subInfo;
     subInfo.setWaitSemaphores(m_imageAvailableSems[m_currentFrame])
         .setWaitDstStageMask(waitStages)
-        .setCommandBuffers(m_commandBuffers[imageIndex.value])
+        .setCommandBuffers(m_commandBuffers[imageIndex.value]) // Make sure to set the IMAGE commandbuffer not the frame index, in case they get out of sync.
         .setSignalSemaphores(m_renderFinishedSems[m_currentFrame]);
 
     m_device.resetFences(m_inFlightFences[m_currentFrame]);
@@ -542,6 +553,8 @@ void App::destroy() {
     m_device.destroyPipelineLayout(m_pipelineLayout);
     m_device.destroyRenderPass(m_renderPass);
 
+    m_vmaAllocator.destroy();
+
     m_device = VK_NULL_HANDLE;
     m_instance = VK_NULL_HANDLE;
 
@@ -551,4 +564,23 @@ void App::destroy() {
 
     glfwDestroyWindow(m_glfwWindow);
     glfwTerminate();
+}
+
+AllocatedBuffer App::createBuffer(size_t size, vk::BufferUsageFlags usage, vma::MemoryUsage memUsage) {
+    vk::BufferCreateInfo buffInfo;
+    buffInfo.setSize(size)
+        .setUsage(usage);
+
+    vma::AllocationCreateInfo vmaAllocInfo;
+    vmaAllocInfo.setUsage(memUsage)
+        .setFlags(vma::AllocationCreateFlagBits::eMapped);
+
+    AllocatedBuffer newBuff;
+
+    auto [b, a] = m_vmaAllocator.createBuffer(buffInfo, vmaAllocInfo);
+
+    newBuff.buffer = b;
+    newBuff.allocation = a;
+
+    return newBuff;
 }

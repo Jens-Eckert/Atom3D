@@ -663,7 +663,6 @@ Result<Instance> InstanceBuilder::build() const {
     }
 
 #if defined(VK_KHR_portability_enumeration)
-    printf("portability\n");
     bool portability_enumeration_support =
         detail::check_extension_supported(system.available_extensions, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
     if (portability_enumeration_support) {
@@ -761,7 +760,6 @@ Result<Instance> InstanceBuilder::build() const {
     instance_create_info.ppEnabledLayerNames = layers.data();
 #if defined(VK_KHR_portability_enumeration)
     if (portability_enumeration_support) {
-        printf("Enumerate Flag\n");
         instance_create_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
     }
 #endif
