@@ -5,6 +5,9 @@ build: ./src/*.cpp
 main:
 	cd build; ./main
 
+run:
+	make build; make main;
+
 debug:
 	make build; cd build; lldb main;
 

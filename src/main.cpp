@@ -1,7 +1,7 @@
 #define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.hpp"
 
-#if defined(WIN32)
+#if defined(WIN32) && defined(_DEBUG)
 #include <Windows.h>
 
 const HANDLE console = GetStdHandle(STD_OUTPUT_HANDLE);

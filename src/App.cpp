@@ -31,17 +31,38 @@ static VkBool32 debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
     std::cout << "\x1b[" << color << "m[" << sevStr << ": " << typeStr << "]: ";
     std::cout << "\x1b[37m" << pCallbackData->pMessage << "\n";
 
-    //std::cout << "[" << sevStr << ": " << typeStr << "]: ";
-    //std::cout  << pCallbackData->pMessage << "\n";
-
     return VK_FALSE;
 }
 
+// Wrapper that just uses the debug callback function for pretty printing.
 static void logInfo(const std::string& msg) {
     VkDebugUtilsMessengerCallbackDataEXT* data = new VkDebugUtilsMessengerCallbackDataEXT;
     data->pMessage = msg.data();
 
     debugCallback(VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT, 8, data, nullptr);
+
+    data->pMessage = nullptr;
+    delete data;
+}
+
+static void logError(const std::string& msg) {
+    VkDebugUtilsMessengerCallbackDataEXT* data = new VkDebugUtilsMessengerCallbackDataEXT;
+    data->pMessage = msg.data();
+
+    debugCallback(VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT, 8, data, nullptr);
+
+    data->pMessage = nullptr;
+    delete data;
+}
+
+static void logWarning(const std::string& msg) {
+    VkDebugUtilsMessengerCallbackDataEXT* data = new VkDebugUtilsMessengerCallbackDataEXT;
+    data->pMessage = msg.data();
+
+    debugCallback(VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT, 8, data, nullptr);
+
+    data->pMessage = nullptr;
+    delete data;
 }
 
 static void glfwFramebufferResizeCallback(GLFWwindow* window, int width, int height) {
@@ -67,6 +88,7 @@ bool App::init() {
     auto instRet = builder
                        .set_app_name("Atom3D")
                        .request_validation_layers()
+                       .require_api_version(ATOM3D_VK_VERSION)
                        .set_debug_callback(debugCallback)
                        .set_debug_messenger_severity(debug_severity)
                        .set_debug_messenger_type(debug_types)
@@ -91,7 +113,13 @@ bool App::init() {
 
     m_surface = tmpSurface;
 
+    vk::PhysicalDeviceVulkan12Features features;
+
+    features.bufferDeviceAddress = true;
+
     vkb::PhysicalDeviceSelector selector(m_vkbInstance);
+    // selector.add_required_extension(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+    selector.set_required_features_12(features);
     auto physRet = selector.set_surface(m_surface).select();
 
     if (!physRet) {
@@ -120,6 +148,12 @@ bool App::init() {
 
     m_vmaAllocator = vma::createAllocator(allocatorInfo);
 
+    m_vmaBudgets = m_vmaAllocator.getHeapBudgets();
+
+    for (size_t i = 0; i < m_vmaBudgets.size(); i++) {
+        logInfo("Budget: " + std::to_string(m_vmaBudgets[i].budget));
+    }
+
     if (!createSwapchain()) {
         return false;
     }
@@ -138,6 +172,8 @@ bool App::init() {
     createCommandPool();
     createCommandBuffers();
     createSyncObjects();
+
+    setupScene();
 
     return true;
 }
@@ -307,9 +343,7 @@ bool App::createGraphicsPipeline() {
     auto binding = Vertex::getBindingDescription();
     auto attrDesc = Vertex::getAttrDesc();
 
-    vk::PipelineVertexInputStateCreateInfo vertexInputInfo;
-    //vertexInputInfo.setVertexBindingDescriptions(binding)
-    //    .setVertexAttributeDescriptions(attrDesc);
+    vk::PipelineVertexInputStateCreateInfo vertexInputInfo({}, binding, attrDesc);
 
     vk::PipelineInputAssemblyStateCreateInfo inputAssemblyInfo({}, vk::PrimitiveTopology::eTriangleList, false);
 
@@ -388,12 +422,12 @@ bool App::createFramebuffers() {
     m_framebuffers.reserve(m_swapchainImageViews.size());
 
     for (int i = 0; i < m_swapchainImageViews.size(); i++) {
-        vk::ImageView aaa = m_swapchainImageViews[i];
+        vk::ImageView iv = m_swapchainImageViews[i];
 
         vk::FramebufferCreateInfo info;
         info.setRenderPass(m_renderPass)
             .setAttachmentCount(1)
-            .setAttachments(aaa)
+            .setAttachments(iv)
             .setWidth(m_vkbSwapchain.extent.width)
             .setHeight(m_vkbSwapchain.extent.height)
             .setLayers(1);
@@ -405,41 +439,45 @@ bool App::createFramebuffers() {
 }
 
 void App::createCommandPool() {
-    vk::CommandPoolCreateInfo info({}, m_vkbDevice.get_queue_index(vkb::QueueType::graphics).value());
+    vk::CommandPoolCreateInfo info(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, m_vkbDevice.get_queue_index(vkb::QueueType::graphics).value());
 
     m_commandPool = m_device.createCommandPool(info);
 }
 
 void App::createCommandBuffers() {
-    vk::CommandBufferAllocateInfo allocInfo(m_commandPool, vk::CommandBufferLevel::ePrimary, m_framebuffers.size());
+    vk::CommandBufferAllocateInfo allocInfo(m_commandPool, vk::CommandBufferLevel::ePrimary, m_framebuffers.size() + 1);
 
-    m_commandBuffers = m_device.allocateCommandBuffers(allocInfo);
+    auto tmp = m_device.allocateCommandBuffers(allocInfo);
 
-    vk::CommandBufferBeginInfo beginInfo;
-    vk::ClearValue clearVal;
-    clearVal.setColor(vk::ClearColorValue(0, 0, 0, 1));
+    m_mainCommandBuffer = tmp[0];
+    m_commandBuffers = std::vector<vk::CommandBuffer>(tmp.begin() + 1, tmp.end());
 
-    for (size_t i = 0; i < m_commandBuffers.size(); i++) {
-        m_commandBuffers[i].begin(beginInfo);
+    // This is done in drawFrame() now !!!!!
+    // vk::CommandBufferBeginInfo beginInfo;
+    // vk::ClearValue clearVal;
+    // clearVal.setColor(vk::ClearColorValue(0, 0, 0, 1));
 
-        vk::RenderPassBeginInfo rpInfo(m_renderPass, m_framebuffers[i], {{0, 0}, {m_vkbSwapchain.extent}}, clearVal);
+    // for (size_t i = 0; i < m_commandBuffers.size(); i++) {
+    //     m_commandBuffers[i].begin(beginInfo);
 
-        vk::Viewport viewport((0.0), (0.0), m_vkbSwapchain.extent.width, m_vkbSwapchain.extent.height, 0, 1);
-        vk::Rect2D scissor({0, 0}, m_vkbSwapchain.extent);
+    //     vk::RenderPassBeginInfo rpInfo(m_renderPass, m_framebuffers[i], {{0, 0}, {m_vkbSwapchain.extent}}, clearVal);
 
-        m_commandBuffers[i].setViewport(0, viewport);
-        m_commandBuffers[i].setScissor(0, scissor);
+    //     vk::Viewport viewport((0.0), (0.0), m_vkbSwapchain.extent.width, m_vkbSwapchain.extent.height, 0, 1);
+    //     vk::Rect2D scissor({0, 0}, m_vkbSwapchain.extent);
 
-        m_commandBuffers[i].beginRenderPass(rpInfo, vk::SubpassContents::eInline);
+    //     m_commandBuffers[i].setViewport(0, viewport);
+    //     m_commandBuffers[i].setScissor(0, scissor);
 
-        m_commandBuffers[i].bindPipeline(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline);
+    //     m_commandBuffers[i].beginRenderPass(rpInfo, vk::SubpassContents::eInline);
 
-        m_commandBuffers[i].draw(3, 1, 0, 0);
+    //     m_commandBuffers[i].bindPipeline(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline);
 
-        m_commandBuffers[i].endRenderPass();
+    //     m_commandBuffers[i].draw(3, 1, 0, 0);
 
-        m_commandBuffers[i].end();
-    }
+    //     m_commandBuffers[i].endRenderPass();
+
+    //     m_commandBuffers[i].end();
+    // }
 }
 
 void App::createSyncObjects() {
@@ -470,6 +508,35 @@ void App::destroySyncObjects() {
         m_device.destroyFence(f);
 }
 
+void App::recordDrawCommandsScene(vk::CommandBuffer cb, uint32_t image, Scene* scene) {
+    vk::RenderPassBeginInfo rpInfo = {};
+    rpInfo.renderPass = m_renderPass;
+    rpInfo.framebuffer = m_framebuffers[image];
+    rpInfo.renderArea.extent = m_vkbSwapchain.extent;
+
+    vk::Viewport viewport((0.0), (0.0), m_vkbSwapchain.extent.width, m_vkbSwapchain.extent.height, 0, 1);
+    vk::Rect2D scissor({0, 0}, m_vkbSwapchain.extent);
+    m_commandBuffers[image].setViewport(0, viewport);
+    m_commandBuffers[image].setScissor(0, scissor);
+
+    vk::ClearValue clearVal;
+    clearVal.setColor(vk::ClearColorValue(0, 0, 0, 1));
+
+    rpInfo.setClearValues(clearVal);
+
+    cb.beginRenderPass(rpInfo, vk::SubpassContents::eInline);
+
+    cb.bindPipeline(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline);
+
+    vk::DeviceSize offsets[] = {0};
+    vk::Buffer buffers[] = {m_scene.buffer.buffer};
+    cb.bindVertexBuffers(0, 1, buffers, offsets);
+
+    cb.draw(3, 1, 0, 0);
+
+    cb.endRenderPass();
+}
+
 bool App::drawFrame() {
     auto fenceWait = m_device.waitForFences(m_inFlightFences[m_currentFrame], true, UINT64_MAX);
 
@@ -490,6 +557,15 @@ bool App::drawFrame() {
         fenceWait = m_device.waitForFences(m_imageInFlightFences[imageIndex.value], true, UINT64_MAX);
     }
 
+    vk::CommandBufferBeginInfo beginInfo;
+    vk::CommandBuffer cb = m_commandBuffers[imageIndex.value];
+
+    cb.begin(beginInfo);
+
+    recordDrawCommandsScene(cb, imageIndex.value, &m_scene);
+
+    cb.end();
+
     m_imageInFlightFences[imageIndex.value] = m_inFlightFences[m_currentFrame];
 
     vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
@@ -497,7 +573,7 @@ bool App::drawFrame() {
     vk::SubmitInfo subInfo;
     subInfo.setWaitSemaphores(m_imageAvailableSems[m_currentFrame])
         .setWaitDstStageMask(waitStages)
-        .setCommandBuffers(m_commandBuffers[imageIndex.value]) // Make sure to set the IMAGE commandbuffer not the frame index, in case they get out of sync.
+        .setCommandBuffers(cb)
         .setSignalSemaphores(m_renderFinishedSems[m_currentFrame]);
 
     m_device.resetFences(m_inFlightFences[m_currentFrame]);
@@ -553,6 +629,7 @@ void App::destroy() {
     m_device.destroyPipelineLayout(m_pipelineLayout);
     m_device.destroyRenderPass(m_renderPass);
 
+    m_vmaAllocator.destroyBuffer(m_scene.buffer.buffer, m_scene.buffer.allocation);
     m_vmaAllocator.destroy();
 
     m_device = VK_NULL_HANDLE;
@@ -566,21 +643,6 @@ void App::destroy() {
     glfwTerminate();
 }
 
-AllocatedBuffer App::createBuffer(size_t size, vk::BufferUsageFlags usage, vma::MemoryUsage memUsage) {
-    vk::BufferCreateInfo buffInfo;
-    buffInfo.setSize(size)
-        .setUsage(usage);
-
-    vma::AllocationCreateInfo vmaAllocInfo;
-    vmaAllocInfo.setUsage(memUsage)
-        .setFlags(vma::AllocationCreateFlagBits::eMapped);
-
-    AllocatedBuffer newBuff;
-
-    auto [b, a] = m_vmaAllocator.createBuffer(buffInfo, vmaAllocInfo);
-
-    newBuff.buffer = b;
-    newBuff.allocation = a;
-
-    return newBuff;
+void App::setupScene() {
+    m_scene.uploadMeshes(m_vmaAllocator, m_mainCommandBuffer, m_graphicsQueue);
 }

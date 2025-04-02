@@ -10,6 +10,12 @@
         "/opt/homebrew/Cellar/glfw/3.4/include",
         "/opt/homebrew/Cellar/glm/1.0.1/include"
       ]
+    },
+    {
+      "name": "Windows",
+      //"compileCommands": ["${workspaceFolder}/build/compile_commands.json"]
+      "cStandard": "c17",
+      "cppStandard": "c++17"
     }
   ],
   "version": 4
