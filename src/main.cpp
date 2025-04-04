@@ -21,7 +21,10 @@ int main() {
 
     App app;
 
-    app.init();
+    if (!app.init()) {
+        system("PAUSE");
+        return -1;
+    }
     app.windowLoop();
     app.destroy();
 

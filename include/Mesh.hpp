@@ -21,9 +21,9 @@ struct Mesh {
         mesh.vertices[2].pos = {0.f, -1.f, 0.0f};
 
         // vertex colors, all green
-        mesh.vertices[0].color = {1.f, 1.f, 0.0f};
+        mesh.vertices[0].color = {1.f, 0.f, 0.0f};
         mesh.vertices[1].color = {0.f, 1.f, 0.0f};
-        mesh.vertices[2].color = {0.f, 1.f, 1.0f};
+        mesh.vertices[2].color = {0.f, 0.f, 1.0f};
     }
 };
 

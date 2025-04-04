@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <mutex>
+#include <iostream>
 
 namespace vkb {
 
@@ -1161,6 +1162,8 @@ PhysicalDevice PhysicalDeviceSelector::populate_device_details(
 PhysicalDevice::Suitable PhysicalDeviceSelector::is_device_suitable(PhysicalDevice const& pd) const {
     PhysicalDevice::Suitable suitable = PhysicalDevice::Suitable::yes;
 
+    std::cout << "req: " << criteria.required_version << ", pd: " << pd.properties.apiVersion << "\n";
+
     if (criteria.name.size() > 0 && criteria.name != pd.properties.deviceName) return PhysicalDevice::Suitable::no;
 
     if (criteria.required_version > pd.properties.apiVersion) return PhysicalDevice::Suitable::no;
@@ -1264,6 +1267,7 @@ Result<std::vector<PhysicalDevice>> PhysicalDeviceSelector::select_impl() const 
     if (vk_physical_devices_ret != VK_SUCCESS) {
         return Result<std::vector<PhysicalDevice>>{PhysicalDeviceError::failed_enumerate_physical_devices, vk_physical_devices_ret};
     }
+
     if (vk_physical_devices.size() == 0) {
         return Result<std::vector<PhysicalDevice>>{PhysicalDeviceError::no_physical_devices_found};
     }

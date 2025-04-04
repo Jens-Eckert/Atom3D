@@ -84,6 +84,8 @@ bool App::init() {
     glfwSetWindowUserPointer(m_glfwWindow, this);
     glfwSetFramebufferSizeCallback(m_glfwWindow, glfwFramebufferResizeCallback);
 
+    const std::vector<const char*> instance_extensions = {VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME};
+
     vkb::InstanceBuilder builder;
     auto instRet = builder
                        .set_app_name("Atom3D")
@@ -92,6 +94,7 @@ bool App::init() {
                        .set_debug_callback(debugCallback)
                        .set_debug_messenger_severity(debug_severity)
                        .set_debug_messenger_type(debug_types)
+                       .enable_extensions(instance_extensions)
                        .build();
 
     if (!instRet) {
@@ -113,13 +116,16 @@ bool App::init() {
 
     m_surface = tmpSurface;
 
-    vk::PhysicalDeviceVulkan12Features features;
-
-    features.bufferDeviceAddress = true;
+    vk::PhysicalDeviceVulkan12Features pd12Features;
+    pd12Features.bufferDeviceAddress = true;
 
     vkb::PhysicalDeviceSelector selector(m_vkbInstance);
-    // selector.add_required_extension(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
-    selector.set_required_features_12(features);
+    selector.set_required_features_12(pd12Features);
+
+#if defined(ATOM3D_USE_VK_DYNAMIC_RENDERING)
+    selector.add_required_extension_features(vk::PhysicalDeviceDynamicRenderingFeatures(1));
+#endif
+
     auto physRet = selector.set_surface(m_surface).select();
 
     if (!physRet) {
@@ -140,6 +146,8 @@ bool App::init() {
     m_vkbDevice = deviceRet.value();
     m_device = m_vkbDevice.device;
 
+    VULKAN_HPP_DEFAULT_DISPATCHER.init(m_instance, m_device);
+
     vma::AllocatorCreateInfo allocatorInfo;
     allocatorInfo.setPhysicalDevice(m_vkbPD.physical_device)
         .setDevice(m_device)
@@ -149,10 +157,6 @@ bool App::init() {
     m_vmaAllocator = vma::createAllocator(allocatorInfo);
 
     m_vmaBudgets = m_vmaAllocator.getHeapBudgets();
-
-    for (size_t i = 0; i < m_vmaBudgets.size(); i++) {
-        logInfo("Budget: " + std::to_string(m_vmaBudgets[i].budget));
-    }
 
     if (!createSwapchain()) {
         return false;
@@ -166,9 +170,12 @@ bool App::init() {
         return false;
     }
 
+#if !defined(ATOM3D_USE_VK_DYNAMIC_RENDERING)
     createRenderPass();
-    createGraphicsPipeline();
     createFramebuffers();
+#endif
+
+    createGraphicsPipeline();
     createCommandPool();
     createCommandBuffers();
     createSyncObjects();
@@ -225,18 +232,21 @@ bool App::recreateSwapchain() {
 
     createSwapchain();
     createSwapchainImageViews();
+#if !defined(ATOM3D_USE_VK_DYNAMIC_RENDERING)
     createFramebuffers();
+#endif
     createCommandPool();
     createCommandBuffers();
 
     return true;
 }
-
+ 
 void App::cleanupSwapchain() {
+#if !defined(ATOM3D_USE_VK_DYNAMIC_RENDERING)
     for (auto& f : m_framebuffers) {
         m_device.destroyFramebuffer(f);
     }
-
+#endif
     m_device.freeCommandBuffers(m_commandPool, m_commandBuffers);
     m_device.destroyCommandPool(m_commandPool);
 
@@ -284,7 +294,7 @@ void App::createRenderPass() {
     vk::SubpassDependency dep(vk::SubpassExternal, 0, vk::PipelineStageFlagBits::eColorAttachmentOutput,
                               vk::PipelineStageFlagBits::eColorAttachmentOutput,
                               vk::AccessFlagBits::eNone,
-                              vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite);
+                              vk::AccessFlagBits::eColorAttachmentWrite);
 
     vk::RenderPassCreateInfo renderPassInfo(vk::RenderPassCreateFlags(),
                                             1, &colorAttachment,
@@ -387,6 +397,13 @@ bool App::createGraphicsPipeline() {
 
     vk::PipelineDynamicStateCreateInfo dynamicInfo({}, dynStates);
 
+#if defined(ATOM3D_USE_VK_DYNAMIC_RENDERING)
+    vk::Format formats = { static_cast<vk::Format>(m_vkbSwapchain.image_format) };
+    vk::PipelineRenderingCreateInfo renderingCreateInfo;
+    renderingCreateInfo.setColorAttachmentCount(1)
+        .setColorAttachmentFormats(formats);
+#endif
+
     // Pipeline
     vk::GraphicsPipelineCreateInfo pipeInfo;
     pipeInfo.setStageCount(2)
@@ -394,7 +411,13 @@ bool App::createGraphicsPipeline() {
         .setPVertexInputState(&vertexInputInfo)
         .setPInputAssemblyState(&inputAssemblyInfo)
         .setPViewportState(&viewportInfo)
+
+#if defined(ATOM3D_USE_VK_DYNAMIC_RENDERING)
+        .setPNext(&renderingCreateInfo)
+#else
         .setRenderPass(m_renderPass)
+#endif
+
         .setPRasterizationState(&rasterizer)
         .setPMultisampleState(&multisampling)
         .setPColorBlendState(&colorblendInfo)
@@ -445,7 +468,7 @@ void App::createCommandPool() {
 }
 
 void App::createCommandBuffers() {
-    vk::CommandBufferAllocateInfo allocInfo(m_commandPool, vk::CommandBufferLevel::ePrimary, m_framebuffers.size() + 1);
+    vk::CommandBufferAllocateInfo allocInfo(m_commandPool, vk::CommandBufferLevel::ePrimary, m_swapchainImages.size() + 1);
 
     auto tmp = m_device.allocateCommandBuffers(allocInfo);
 
@@ -509,22 +532,70 @@ void App::destroySyncObjects() {
 }
 
 void App::recordDrawCommandsScene(vk::CommandBuffer cb, uint32_t image, Scene* scene) {
-    vk::RenderPassBeginInfo rpInfo = {};
+    vk::Viewport viewport((0.0), (0.0), 
+                          m_vkbSwapchain.extent.width, 
+                          m_vkbSwapchain.extent.height, 
+                          0, 1);
+
+    vk::Rect2D scissor({0, 0}, m_vkbSwapchain.extent);
+    cb.setViewport(0, viewport);
+    cb.setScissor(0, scissor);
+
+    vk::ClearColorValue val(1.f, 0.5f, 0.2f, 1.f);
+
+    vk::ClearValue clearVal;
+    clearVal.setColor(vk::ClearColorValue(1.f, 0.f, 0.f, 1.f));
+
+    vk::ImageSubresourceRange range;
+    range.setAspectMask(vk::ImageAspectFlagBits::eColor)
+        .setBaseMipLevel(0)
+        .setLevelCount(vk::RemainingMipLevels)
+        .setBaseArrayLayer(0)
+        .setLayerCount(vk::RemainingArrayLayers);
+
+#if defined(ATOM3D_USE_VK_DYNAMIC_RENDERING)
+    // Transition Image Layout to ColorAttachmentOptimal
+    
+
+    vk::ImageMemoryBarrier barrier{};
+    barrier.setSrcAccessMask(vk::AccessFlagBits::eNone)
+        .setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite)
+        .setOldLayout(vk::ImageLayout::eUndefined)
+        .setNewLayout(vk::ImageLayout::eColorAttachmentOptimal)
+        .setImage(m_swapchainImages[image])
+        .setSubresourceRange(range);
+
+    cb.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput, 
+                       vk::PipelineStageFlagBits::eColorAttachmentOutput, 
+                       {}, nullptr, nullptr, barrier);
+
+    // Setup rendering
+    vk::RenderingAttachmentInfo colorInfo;
+    colorInfo
+        .setClearValue(clearVal)
+        .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
+        .setImageView(m_swapchainImageViews[image])
+        .setLoadOp(vk::AttachmentLoadOp::eClear)
+        .setStoreOp(vk::AttachmentStoreOp::eStore);
+
+    vk::Rect2D renderArea({ 0, 0 }, {m_vkbSwapchain.extent.width, m_vkbSwapchain.extent.height});
+
+    vk::RenderingInfo renderInfo;
+    renderInfo.setColorAttachments(colorInfo)
+        .setRenderArea(renderArea)
+        .setLayerCount(1);
+
+    cb.beginRendering(renderInfo);
+#else
+    vk::RenderPassBeginInfo rpInfo;
     rpInfo.renderPass = m_renderPass;
     rpInfo.framebuffer = m_framebuffers[image];
     rpInfo.renderArea.extent = m_vkbSwapchain.extent;
-
-    vk::Viewport viewport((0.0), (0.0), m_vkbSwapchain.extent.width, m_vkbSwapchain.extent.height, 0, 1);
-    vk::Rect2D scissor({0, 0}, m_vkbSwapchain.extent);
-    m_commandBuffers[image].setViewport(0, viewport);
-    m_commandBuffers[image].setScissor(0, scissor);
-
-    vk::ClearValue clearVal;
-    clearVal.setColor(vk::ClearColorValue(0, 0, 0, 1));
-
+    rpInfo.setClearValueCount(1);
     rpInfo.setClearValues(clearVal);
 
     cb.beginRenderPass(rpInfo, vk::SubpassContents::eInline);
+#endif
 
     cb.bindPipeline(vk::PipelineBindPoint::eGraphics, m_graphicsPipeline);
 
@@ -534,7 +605,20 @@ void App::recordDrawCommandsScene(vk::CommandBuffer cb, uint32_t image, Scene* s
 
     cb.draw(3, 1, 0, 0);
 
+#if defined(ATOM3D_USE_VK_DYNAMIC_RENDERING)
+    cb.endRendering();
+
+    barrier.setSrcAccessMask(vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eColorAttachmentRead)
+        .setDstAccessMask(vk::AccessFlagBits::eNone)
+        .setOldLayout(vk::ImageLayout::eColorAttachmentOptimal)
+        .setNewLayout(vk::ImageLayout::ePresentSrcKHR)
+        .setImage(m_swapchainImages[image])
+        .setSubresourceRange(range);
+
+    cb.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eColorAttachmentOutput, {}, nullptr, nullptr, barrier);
+#else
     cb.endRenderPass();
+#endif
 }
 
 bool App::drawFrame() {

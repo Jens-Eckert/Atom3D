@@ -8,7 +8,10 @@
 // VULKAN
 #include <VkBootstrap.h>
 
+#define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC 1
 #include <vulkan/vulkan.hpp>
+
+VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 
 // STD
 #include <deque>
@@ -29,9 +32,10 @@ constexpr int MAX_FRAMES_IN_FLIGHT = 3;
 #if defined(__APPLE__)
 #define ATOM3D_VK_VERSION VK_MAKE_API_VERSION(0, 1, 2, 296)
 #elif defined(WIN32)
-#define ATOM3D_VK_VERSION VK_MAKE_API_VERSION(0, 1, 4, 304)
+#define ATOM3D_VK_VERSION VK_MAKE_API_VERSION(0, 1, 4, 303)
+#define ATOM3D_USE_VK_DYNAMIC_RENDERING
 #else
-#define ATOM3D_VK_VERSION VK_MAKE_API_VERSION(0, 1, 4, 304)
+#define ATOM3D_VK_VERSION VK_MAKE_API_VERSION(0, 1, 4, 303)
 #endif
 
 struct DeletionQueue {
